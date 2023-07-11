@@ -1,8 +1,11 @@
-from lib import AerDeployment
+from lib import AerDeployment, BasicOffloading
 
 if __name__ == '__main__':
+    # create and configure deployment
     deployment = AerDeployment()
-    deployment.generate_times()
     deployment.drop_nodes()
     deployment.compute_channels()
-    print()
+
+    # create the offloading instance
+    offl = BasicOffloading(deployment.active_connections, 10, 1/40, deployment.n_bs, deployment.n_uav)
+    offl.run()

@@ -2,6 +2,7 @@ import numpy as np
 import math
 import random
 import copy
+import heapq
 
 
 class AerDeployment:
@@ -22,7 +23,6 @@ class AerDeployment:
         self.tx_pow_bs = 25
         self.tx_pow_uav = 20
         self.tx_pow_haps = 40
-        self.tasks_state = {ue: np.zeros([4, self.n_tasks]) for ue in range(10)}    # columns: time, node_num, status, delay
         # nodes are enumerated in the following way 0-n_ue (ues), n_ue-n_ue+n_bs (bss),
         # n_ue+n_bs-n_ue+n_bs+n_uav (uavs), n_ue+n_bs+n_uav-n_ue+n_bs+n_uav+1 (haps)
         self.channel_matrix = np.zeros([self.n_ues + self.n_bs + self.n_uav + 1,
@@ -38,16 +38,6 @@ class AerDeployment:
         self.haps_pos = np.array([0, 0, self.haps_height])
         self.uav_pos = np.zeros([self.n_uav, 3])
         self.thermal_noise_density = -173.93
-
-    def next_time(self):
-        random.seed(self.seed)
-        return -math.log(1.0 - random.random()) / self.rate_parameter
-
-    def generate_times(self):
-        for ue in range(self.n_ues):
-            for i in range(self.n_tasks):
-                self.tasks_state[ue][0, i] = np.round(self.next_time(), self.precision)
-            self.tasks_state[ue] = np.sort(self.tasks_state[ue])
 
     def drop_in_circle(self, n_points, height):
         random.seed(self.seed)
@@ -133,3 +123,118 @@ class AerDeployment:
                 max_id = np.where(ch == max_num)[0][0]
                 ch[max_id] = 0
                 self.active_connections[ue, n] = max_id
+
+
+class Task:
+    def __init__(self, arrival_time, user_id):
+        self.arrival_time = arrival_time
+        self.user_id = user_id
+
+
+class Server:
+    def __init__(self, processing_time, server_id, comp_resources):
+        self.processing_time = processing_time
+        self.is_busy = False
+        self.completion_time = 0
+        self.server_id = server_id
+        self.processing_tasks = []
+        self.comp_resources = comp_resources
+
+
+class BasicOffloading:
+    def __init__(self, ue_connections, num_tasks, mean_arrival_rate, n_bs, n_uav):
+        self.num_tasks = num_tasks
+        self.mean_arrival_rate = mean_arrival_rate
+        self.task_size = 1
+        self.current_time = 0
+        self.event_queue = []
+        self.ue_connections = ue_connections
+        self.resources_ue = 5
+        self.resources_uav = 10
+        self.resources_bs = 150
+        self.resources_haps = 100
+        self.users = range(ue_connections.shape[0])
+        self.processing_times = []
+        self.resources_per_servers = []
+        self.servers = []
+        self.n_bs = n_bs
+        self.n_uav = n_uav
+        self.current_time = 0
+        self.uav_offload_prob = 0.5
+
+    def generate_tasks(self):
+        for user_id in self.users:
+            arrival_time = 0
+            for _ in range(self.num_tasks):
+                arrival_time += random.expovariate(self.mean_arrival_rate)
+                task = Task(arrival_time, user_id)
+                heapq.heappush(self.event_queue, (arrival_time, task))
+
+    def initialize_servers(self):
+        for bs in range(self.n_bs):
+            self.processing_times.append(self.task_size / self.resources_bs)
+            self.resources_per_servers.append(self.resources_bs)
+        for uav in range(self.n_uav):
+            self.processing_times.append(self.task_size / self.resources_uav)
+            self.resources_per_servers.append(self.resources_uav)
+        self.processing_times.append(self.task_size / self.resources_haps)
+        self.resources_per_servers.append(self.resources_haps)
+        num_servers = self.n_bs + self.n_uav + 1
+        self.servers = [Server(self.processing_times[i], i + len(self.users),
+                               self.resources_per_servers[i]) for i in range(num_servers)]
+
+    def process_task(self, task, strategy_num):
+        ue_num = task.user_id
+        uav_ids = np.array(range(ue_num+self.n_bs, ue_num+self.n_bs+self.n_uav))
+        if strategy_num == 1:
+            # best availability strategy
+            available_servers = []
+            for conn in self.ue_connections[ue_num]:
+                k = int(conn - len(self.users))
+                available_servers.append(self.servers[k])
+
+            availability_state = np.zeros(len(available_servers))
+            for n_s, server in enumerate(available_servers):
+                if server.is_busy is False:
+                    availability_state[n_s] = 1
+
+            best_server = np.where(availability_state == 1)
+            if len(best_server[0]) == 0:
+                return
+            elif len(best_server[0]) == 1:
+                serving_server = available_servers[best_server[0][0]]
+            else:
+                best_comp_res = available_servers[best_server[0][0]].comp_resources
+                serving_server = available_servers[best_server[0][0]]
+                for s_n in best_server[0]:
+                    s = available_servers[best_server[0][s_n]]
+                    if np.any(s.server_id == uav_ids):
+                        curr_comp_res = random.choices([self.resources_haps, self.resources_uav],
+                                                       [self.uav_offload_prob, 1-self.uav_offload_prob])
+                    else:
+                        curr_comp_res = s.comp_resources
+
+                    if curr_comp_res > best_comp_res:
+                        serving_server = s
+                        best_comp_res = copy.copy(curr_comp_res)
+
+
+            serving_server.is_busy = True
+            serving_server.completion_time = self.current_time + serving_server.processing_time
+            serving_server.processing_tasks.append(task)
+
+    def run(self):
+        self.generate_tasks()
+        self.initialize_servers()
+        while self.event_queue:
+            event_time, event = heapq.heappop(self.event_queue)
+            self.current_time = event_time
+
+            if isinstance(event, Task):
+                self.process_task(event, 1)
+            else:
+                # check if any servers have completed processing
+                for server in self.servers:
+                    if self.current_time >= server.completion_time:
+                        server.is_busy = False
+                        server.processing_tasks = []
