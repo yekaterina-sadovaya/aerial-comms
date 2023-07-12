@@ -27,6 +27,8 @@ class AerDeployment:
         # n_ue+n_bs-n_ue+n_bs+n_uav (uavs), n_ue+n_bs+n_uav-n_ue+n_bs+n_uav+1 (haps)
         self.channel_matrix = np.zeros([self.n_ues + self.n_bs + self.n_uav + 1,
                                         self.n_ues + self.n_bs + self.n_uav + 1])
+        self.propagation_dists = np.zeros([self.n_ues + self.n_bs + self.n_uav + 1,
+                                           self.n_ues + self.n_bs + self.n_uav + 1])
         self.mc_degree = 2
         self.active_connections = np.zeros([self.n_ues, self.mc_degree])
         self.haps_height = 1500
@@ -101,11 +103,11 @@ class AerDeployment:
                         fc = self.fc_uav
                     elif self.n_ues <= link2_num < self.n_ues + self.n_bs:
                         height2 = self.bs_height
-                        pos2 = self.ue_pos[self.n_bs - (link2_num - self.n_ues), :]
+                        pos2 = self.bs_pos[link2_num - self.n_ues, :]
                         fc = self.fc_bs
                     elif self.n_ues + self.n_bs <= link2_num < self.n_ues + self.n_bs + self.n_uav:
                         height2 = self.uav_height
-                        pos2 = self.ue_pos[self.n_uav - (link2_num - self.n_ues - self.n_bs), :]
+                        pos2 = self.uav_pos[link2_num - self.n_ues - self.n_bs, :]
                         fc = self.fc_uav
                     else:
                         height2 = self.haps_height
@@ -115,6 +117,7 @@ class AerDeployment:
                     dist = np.linalg.norm(pos1 - pos2)
                     rx_pow = tx_pow - self.UMa_LoS(dist, fc, height1, height2) - self.thermal_noise_density
                     self.channel_matrix[link1_num, link2_num] = 10.0 ** ((rx_pow-30) / 10.0)
+                    self.propagation_dists[link1_num, link2_num] = dist
 
         for ue in range(self.n_ues):
             ch = copy.copy(self.channel_matrix[ue, :])
@@ -142,8 +145,9 @@ class Server:
 
 
 class BasicOffloading:
-    def __init__(self, ue_connections, num_tasks, mean_arrival_rate, n_bs, n_uav):
+    def __init__(self, ue_connections, delay_matrix, num_tasks, mean_arrival_rate, n_bs, n_uav):
         self.num_tasks = num_tasks
+        self.dist_matrix = delay_matrix
         self.mean_arrival_rate = mean_arrival_rate
         self.task_size = 1
         self.current_time = 0
@@ -159,6 +163,7 @@ class BasicOffloading:
         self.servers = []
         self.n_bs = n_bs
         self.n_uav = n_uav
+        self.n_ues = len(self.users)
         self.current_time = 0
         self.uav_offload_prob = 0.5
 
@@ -190,7 +195,7 @@ class BasicOffloading:
             # best availability strategy
             available_servers = []
             for conn in self.ue_connections[ue_num]:
-                k = int(conn - len(self.users))
+                k = int(conn - self.n_ues)
                 available_servers.append(self.servers[k])
 
             availability_state = np.zeros(len(available_servers))
@@ -202,25 +207,49 @@ class BasicOffloading:
             if len(best_server[0]) == 0:
                 return
             elif len(best_server[0]) == 1:
+                flag_offl_uav = 0
                 serving_server = available_servers[best_server[0][0]]
+                if np.any(serving_server.server_id == uav_ids):
+                    curr_comp_res = random.choices([self.resources_haps, self.resources_uav],
+                                                   [self.uav_offload_prob, 1-self.uav_offload_prob])
+                    if curr_comp_res == self.resources_haps:
+                        flag_offl_uav = 1
             else:
                 best_comp_res = available_servers[best_server[0][0]].comp_resources
                 serving_server = available_servers[best_server[0][0]]
+                flag_offl_uav = 0
                 for s_n in best_server[0]:
                     s = available_servers[best_server[0][s_n]]
+
                     if np.any(s.server_id == uav_ids):
                         curr_comp_res = random.choices([self.resources_haps, self.resources_uav],
                                                        [self.uav_offload_prob, 1-self.uav_offload_prob])
+                        if curr_comp_res > best_comp_res:
+                            serving_server = s
+                            best_comp_res = copy.copy(curr_comp_res)
+                            if curr_comp_res == self.resources_haps:
+                                if self.servers[-1].is_busy == False:
+                                    flag_offl_uav = 1
+                                else:
+                                    return
+
                     else:
                         curr_comp_res = s.comp_resources
-
-                    if curr_comp_res > best_comp_res:
-                        serving_server = s
-                        best_comp_res = copy.copy(curr_comp_res)
-
+                        if curr_comp_res > best_comp_res:
+                            flag_offl_uav = 0
+                            serving_server = s
+                            best_comp_res = copy.copy(curr_comp_res)
 
             serving_server.is_busy = True
-            serving_server.completion_time = self.current_time + serving_server.processing_time
+            server_id = serving_server.server_id
+            prop_delay = self.dist_matrix[ue_num, server_id]/3e8
+            if flag_offl_uav == 0:
+                serving_server.completion_time = self.current_time + serving_server.processing_time + prop_delay
+            else:
+                prop_delay2 = self.dist_matrix[server_id, self.n_bs + self.n_uav]
+                serving_server.completion_time = self.current_time + self.servers[-1].processing_time \
+                                                 + prop_delay + prop_delay2
+            print(serving_server.completion_time)
             serving_server.processing_tasks.append(task)
 
     def run(self):
