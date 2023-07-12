@@ -212,6 +212,7 @@ class BasicOffloading:
                 if np.any(serving_server.server_id == uav_ids):
                     curr_comp_res = random.choices([self.resources_haps, self.resources_uav],
                                                    [self.uav_offload_prob, 1-self.uav_offload_prob])
+                    curr_comp_res = curr_comp_res[0]
                     if curr_comp_res == self.resources_haps:
                         flag_offl_uav = 1
             else:
@@ -224,6 +225,7 @@ class BasicOffloading:
                     if np.any(s.server_id == uav_ids):
                         curr_comp_res = random.choices([self.resources_haps, self.resources_uav],
                                                        [self.uav_offload_prob, 1-self.uav_offload_prob])
+                        curr_comp_res = curr_comp_res[0]
                         if curr_comp_res > best_comp_res:
                             serving_server = s
                             best_comp_res = copy.copy(curr_comp_res)
@@ -249,6 +251,7 @@ class BasicOffloading:
                 prop_delay2 = self.dist_matrix[server_id, self.n_bs + self.n_uav]
                 serving_server.completion_time = self.current_time + self.servers[-1].processing_time \
                                                  + prop_delay + prop_delay2
+            heapq.heappop(self.event_queue)
             print(serving_server.completion_time)
             serving_server.processing_tasks.append(task)
 
@@ -256,14 +259,14 @@ class BasicOffloading:
         self.generate_tasks()
         self.initialize_servers()
         while self.event_queue:
-            event_time, event = heapq.heappop(self.event_queue)
+            event_time, event = self.event_queue[0]
             self.current_time = event_time
+
+            # check if any servers have completed processing
+            for server in self.servers:
+                if self.current_time >= server.completion_time:
+                    server.is_busy = False
+                    server.processing_tasks = []
 
             if isinstance(event, Task):
                 self.process_task(event, 1)
-            else:
-                # check if any servers have completed processing
-                for server in self.servers:
-                    if self.current_time >= server.completion_time:
-                        server.is_busy = False
-                        server.processing_tasks = []
