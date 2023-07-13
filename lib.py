@@ -10,7 +10,7 @@ class AerDeployment:
         self.n_ues = 10
         self.n_bs = 2
         self.n_uav = 2
-        self.R_haps = 500
+        self.R_haps = 1500
         self.rate_parameter = 1/20
         self.n_tasks = int(1e2)
         self.precision = 3
@@ -132,16 +132,16 @@ class Task:
     def __init__(self, arrival_time, user_id):
         self.arrival_time = arrival_time
         self.user_id = user_id
+        self.queue_entry_time = 0
 
 
 class Server:
     def __init__(self, processing_time, server_id, comp_resources):
         self.processing_time = processing_time
-        self.is_busy = False
-        self.completion_time = 0
         self.server_id = server_id
-        self.processing_tasks = []
+        self.tasks_queue = []
         self.comp_resources = comp_resources
+        self.current_time = 0
 
 
 class BasicOffloading:
@@ -149,8 +149,7 @@ class BasicOffloading:
         self.num_tasks = num_tasks
         self.dist_matrix = delay_matrix
         self.mean_arrival_rate = mean_arrival_rate
-        self.task_size = 1
-        self.current_time = 0
+        self.task_size = 10
         self.event_queue = []
         self.ue_connections = ue_connections
         self.resources_ue = 5
@@ -164,8 +163,8 @@ class BasicOffloading:
         self.n_bs = n_bs
         self.n_uav = n_uav
         self.n_ues = len(self.users)
-        self.current_time = 0
         self.uav_offload_prob = 0.5
+        self.delay_statistics = {}
 
     def generate_tasks(self):
         for user_id in self.users:
@@ -187,6 +186,7 @@ class BasicOffloading:
         num_servers = self.n_bs + self.n_uav + 1
         self.servers = [Server(self.processing_times[i], i + len(self.users),
                                self.resources_per_servers[i]) for i in range(num_servers)]
+        self.delay_statistics = {n_s: [] for n_s in range(self.n_ues, self.n_ues + num_servers)}
 
     def process_task(self, task, strategy_num):
         ue_num = task.user_id
@@ -198,75 +198,60 @@ class BasicOffloading:
                 k = int(conn - self.n_ues)
                 available_servers.append(self.servers[k])
 
-            availability_state = np.zeros(len(available_servers))
-            for n_s, server in enumerate(available_servers):
-                if server.is_busy is False:
-                    availability_state[n_s] = 1
+            best_comp_res = available_servers[0].comp_resources
+            serving_server = available_servers[0]
+            flag_offl_uav = 0
+            for s in available_servers:
 
-            best_server = np.where(availability_state == 1)
-            if len(best_server[0]) == 0:
-                return
-            elif len(best_server[0]) == 1:
-                flag_offl_uav = 0
-                serving_server = available_servers[best_server[0][0]]
-                if np.any(serving_server.server_id == uav_ids):
+                if np.any(s.server_id == uav_ids):
                     curr_comp_res = random.choices([self.resources_haps, self.resources_uav],
                                                    [self.uav_offload_prob, 1-self.uav_offload_prob])
                     curr_comp_res = curr_comp_res[0]
-                    if curr_comp_res == self.resources_haps:
-                        flag_offl_uav = 1
-            else:
-                best_comp_res = available_servers[best_server[0][0]].comp_resources
-                serving_server = available_servers[best_server[0][0]]
-                flag_offl_uav = 0
-                for s_n in best_server[0]:
-                    s = available_servers[best_server[0][s_n]]
+                    if curr_comp_res > best_comp_res:
+                        serving_server = s
+                        best_comp_res = copy.copy(curr_comp_res)
 
-                    if np.any(s.server_id == uav_ids):
-                        curr_comp_res = random.choices([self.resources_haps, self.resources_uav],
-                                                       [self.uav_offload_prob, 1-self.uav_offload_prob])
-                        curr_comp_res = curr_comp_res[0]
-                        if curr_comp_res > best_comp_res:
-                            serving_server = s
-                            best_comp_res = copy.copy(curr_comp_res)
-                            if curr_comp_res == self.resources_haps:
-                                if self.servers[-1].is_busy == False:
-                                    flag_offl_uav = 1
-                                else:
-                                    return
+                else:
+                    curr_comp_res = s.comp_resources
+                    if curr_comp_res > best_comp_res:
+                        flag_offl_uav = 0
+                        serving_server = s
+                        best_comp_res = copy.copy(curr_comp_res)
 
-                    else:
-                        curr_comp_res = s.comp_resources
-                        if curr_comp_res > best_comp_res:
-                            flag_offl_uav = 0
-                            serving_server = s
-                            best_comp_res = copy.copy(curr_comp_res)
+            if task.arrival_time > serving_server.current_time:
+                serving_server.current_time = task.arrival_time
+            task.queue_entry_time = copy.copy(task.arrival_time)
+            serving_server.tasks_queue.append(task)
 
-            serving_server.is_busy = True
             server_id = serving_server.server_id
             prop_delay = self.dist_matrix[ue_num, server_id]/3e8
+
+            # process the first task in the queue
+            curr_task = serving_server.tasks_queue[0]
+            waiting_time = serving_server.current_time - curr_task.queue_entry_time
             if flag_offl_uav == 0:
-                serving_server.completion_time = self.current_time + serving_server.processing_time + prop_delay
+                completion_time = serving_server.current_time + serving_server.processing_time + \
+                                                 prop_delay + waiting_time
+                self.delay_statistics[server_id].append(completion_time - curr_task.arrival_time)
             else:
                 prop_delay2 = self.dist_matrix[server_id, self.n_bs + self.n_uav]
-                serving_server.completion_time = self.current_time + self.servers[-1].processing_time \
-                                                 + prop_delay + prop_delay2
-            heapq.heappop(self.event_queue)
-            print(serving_server.completion_time)
-            serving_server.processing_tasks.append(task)
+                completion_time = serving_server.current_time + self.servers[-1].processing_time \
+                                                 + prop_delay + prop_delay2 + waiting_time
+                self.delay_statistics[self.n_ues+self.n_bs+self.n_uav].append(completion_time - curr_task.arrival_time)
+
+            print(completion_time - curr_task.arrival_time)
+            serving_server.tasks_queue.pop(0)
+            serving_server.current_time += self.servers[-1].processing_time
 
     def run(self):
         self.generate_tasks()
         self.initialize_servers()
         while self.event_queue:
-            event_time, event = self.event_queue[0]
-            self.current_time = event_time
-
-            # check if any servers have completed processing
-            for server in self.servers:
-                if self.current_time >= server.completion_time:
-                    server.is_busy = False
-                    server.processing_tasks = []
+            # event_time, event = self.event_queue[0]
+            event_time, event = heapq.heappop(self.event_queue)
+            # self.current_time = event_time
 
             if isinstance(event, Task):
                 self.process_task(event, 1)
+
+        #print(self.delay_statistics)

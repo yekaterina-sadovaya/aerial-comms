@@ -8,5 +8,5 @@ if __name__ == '__main__':
 
     # create the offloading instance
     offl = BasicOffloading(deployment.active_connections, deployment.propagation_dists,
-                           10, 1 / 40, deployment.n_bs, deployment.n_uav)
+                           1000, 1.5, deployment.n_bs, deployment.n_uav)
     offl.run()
