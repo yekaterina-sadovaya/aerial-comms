@@ -155,7 +155,7 @@ class BasicOffloading:
         self.resources_ue = 5
         self.resources_uav = 10
         self.resources_bs = 150
-        self.resources_haps = 100
+        self.resources_haps = 200
         self.users = range(ue_connections.shape[0])
         self.processing_times = []
         self.resources_per_servers = []
@@ -163,7 +163,7 @@ class BasicOffloading:
         self.n_bs = n_bs
         self.n_uav = n_uav
         self.n_ues = len(self.users)
-        self.uav_offload_prob = 0.5
+        self.uav_offload_prob = 0.7
         self.delay_statistics = {}
 
     def generate_tasks(self):
@@ -207,13 +207,14 @@ class BasicOffloading:
                     curr_comp_res = random.choices([self.resources_haps, self.resources_uav],
                                                    [self.uav_offload_prob, 1-self.uav_offload_prob])
                     curr_comp_res = curr_comp_res[0]
-                    if curr_comp_res > best_comp_res:
+                    if curr_comp_res >= best_comp_res:
+                        flag_offl_uav = 1
                         serving_server = s
                         best_comp_res = copy.copy(curr_comp_res)
 
                 else:
                     curr_comp_res = s.comp_resources
-                    if curr_comp_res > best_comp_res:
+                    if curr_comp_res >= best_comp_res:
                         flag_offl_uav = 0
                         serving_server = s
                         best_comp_res = copy.copy(curr_comp_res)
@@ -234,7 +235,7 @@ class BasicOffloading:
                                                  prop_delay + waiting_time
                 self.delay_statistics[server_id].append(completion_time - curr_task.arrival_time)
             else:
-                prop_delay2 = self.dist_matrix[server_id, self.n_bs + self.n_uav]
+                prop_delay2 = self.dist_matrix[server_id, self.n_bs + self.n_uav]/3e8
                 completion_time = serving_server.current_time + self.servers[-1].processing_time \
                                                  + prop_delay + prop_delay2 + waiting_time
                 self.delay_statistics[self.n_ues+self.n_bs+self.n_uav].append(completion_time - curr_task.arrival_time)
@@ -254,4 +255,4 @@ class BasicOffloading:
             if isinstance(event, Task):
                 self.process_task(event, 1)
 
-        #print(self.delay_statistics)
+        print(self.delay_statistics)
