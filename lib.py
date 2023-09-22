@@ -129,10 +129,11 @@ class AerDeployment:
 
 
 class Task:
-    def __init__(self, arrival_time, user_id):
+    def __init__(self, arrival_time, user_id, task_size):
         self.arrival_time = arrival_time
         self.user_id = user_id
         self.queue_entry_time = 0
+        self.size = task_size
 
 
 class Server:
@@ -145,7 +146,7 @@ class Server:
 
 
 class BasicOffloading:
-    def __init__(self, ue_connections, delay_matrix, num_tasks, mean_arrival_rate, n_bs, n_uav):
+    def __init__(self, ue_connections, delay_matrix, num_tasks, mean_arrival_rate, n_uav):
         self.num_tasks = num_tasks
         self.dist_matrix = delay_matrix
         self.mean_arrival_rate = mean_arrival_rate
@@ -154,95 +155,55 @@ class BasicOffloading:
         self.ue_connections = ue_connections
         self.resources_ue = 5
         self.resources_uav = 10
-        self.resources_bs = 150
         self.resources_haps = 200
         self.users = range(ue_connections.shape[0])
-        self.processing_times = []
-        self.resources_per_servers = []
+        self.processing_times = {'ues': [], 'uavs':[], 'hap':[]}
         self.servers = []
-        self.n_bs = n_bs
         self.n_uav = n_uav
         self.n_ues = len(self.users)
         self.uav_offload_prob = 0.7
-        self.delay_statistics = {}
+        self.delay_statistics = {'ues': [], 'uavs':[], 'hap':[]}
 
     def generate_tasks(self):
         for user_id in self.users:
             arrival_time = 0
             for _ in range(self.num_tasks):
                 arrival_time += random.expovariate(self.mean_arrival_rate)
-                task = Task(arrival_time, user_id)
+                task = Task(arrival_time, user_id, self.task_size)
                 heapq.heappush(self.event_queue, (arrival_time, task))
 
     def initialize_servers(self):
-        for bs in range(self.n_bs):
-            self.processing_times.append(self.task_size / self.resources_bs)
-            self.resources_per_servers.append(self.resources_bs)
+
         for uav in range(self.n_uav):
-            self.processing_times.append(self.task_size / self.resources_uav)
-            self.resources_per_servers.append(self.resources_uav)
-        self.processing_times.append(self.task_size / self.resources_haps)
-        self.resources_per_servers.append(self.resources_haps)
-        num_servers = self.n_bs + self.n_uav + 1
-        self.servers = [Server(self.processing_times[i], i + len(self.users),
-                               self.resources_per_servers[i]) for i in range(num_servers)]
-        self.delay_statistics = {n_s: [] for n_s in range(self.n_ues, self.n_ues + num_servers)}
+            t_pr_uav = self.task_size / self.resources_uav
+            self.processing_times['uavs'].append(t_pr_uav)
+            self.servers.append(Server(t_pr_uav, 'uav'+str(uav), self.resources_uav))
+
+        for ue in range(self.n_ues):
+            t_pr_ue = self.task_size / self.resources_ue
+            self.processing_times['ues'].append(t_pr_ue)
+            self.servers.append(Server(t_pr_ue, 'ue'+str(ue), self.resources_ue))
+
+        t_pr_hap = self.task_size / self.resources_haps
+        self.processing_times['hap'].append(t_pr_hap)
+        self.servers.append(Server(t_pr_hap, 'hap', self.resources_haps))
 
     def process_task(self, task, strategy_num):
         ue_num = task.user_id
-        uav_ids = np.array(range(ue_num+self.n_bs, ue_num+self.n_bs+self.n_uav))
-        if strategy_num == 1:
-            # best availability strategy
-            available_servers = []
-            for conn in self.ue_connections[ue_num]:
-                k = int(conn - self.n_ues)
-                available_servers.append(self.servers[k])
 
-            best_comp_res = available_servers[0].comp_resources
-            serving_server = available_servers[0]
-            flag_offl_uav = 0
-            for s in available_servers:
-
-                if np.any(s.server_id == uav_ids):
-                    curr_comp_res = random.choices([self.resources_haps, self.resources_uav],
-                                                   [self.uav_offload_prob, 1-self.uav_offload_prob])
-                    curr_comp_res = curr_comp_res[0]
-                    if curr_comp_res >= best_comp_res:
-                        flag_offl_uav = 1
-                        serving_server = s
-                        best_comp_res = copy.copy(curr_comp_res)
-
-                else:
-                    curr_comp_res = s.comp_resources
-                    if curr_comp_res >= best_comp_res:
-                        flag_offl_uav = 0
-                        serving_server = s
-                        best_comp_res = copy.copy(curr_comp_res)
-
-            if task.arrival_time > serving_server.current_time:
-                serving_server.current_time = task.arrival_time
-            task.queue_entry_time = copy.copy(task.arrival_time)
-            serving_server.tasks_queue.append(task)
-
-            server_id = serving_server.server_id
-            prop_delay = self.dist_matrix[ue_num, server_id]/3e8
-
-            # process the first task in the queue
-            curr_task = serving_server.tasks_queue[0]
-            waiting_time = serving_server.current_time - curr_task.queue_entry_time
-            if flag_offl_uav == 0:
-                completion_time = serving_server.current_time + serving_server.processing_time + \
-                                                 prop_delay + waiting_time
-                self.delay_statistics[server_id].append(completion_time - curr_task.arrival_time)
-            else:
-                prop_delay2 = self.dist_matrix[server_id, self.n_bs + self.n_uav]/3e8
-                completion_time = serving_server.current_time + self.servers[-1].processing_time \
-                                                 + prop_delay + prop_delay2 + waiting_time
-                self.delay_statistics[self.n_ues+self.n_bs+self.n_uav].append(completion_time - curr_task.arrival_time)
-
-            print(completion_time - curr_task.arrival_time)
-            serving_server.tasks_queue.pop(0)
-            serving_server.current_time += self.servers[-1].processing_time
+        # compute waiting time for local compute
+        serv_time = self.processing_times['ues'][ue_num]
+        serving_node = next(item for item in self.servers if item.server_id == "ue"+str(ue_num))
+        D_UE = len(serving_node.tasks_queue)*serving_node.processing_time
+        x = task.arrival_time
+        b = (1 - self.mean_arrival_rate*serv_time)
+        F = 0
+        for k in range(0, np.floor(x/serv_time)):
+            fact_k = 1
+            for i in range(1, k+1):
+                fact_k = fact_k * i
+            F = F + b*(-self.mean_arrival_rate*((x - k*serv_time)**k)*
+                       np.exp(self.mean_arrival_rate*(x - k*serv_time)))/fact_k
 
     def run(self):
         self.generate_tasks()
