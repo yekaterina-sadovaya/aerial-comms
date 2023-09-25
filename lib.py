@@ -8,7 +8,6 @@ import heapq
 class AerDeployment:
     def __init__(self):
         self.n_ues = 10
-        self.n_bs = 2
         self.n_uav = 2
         self.R_haps = 1500
         self.rate_parameter = 1/20
@@ -20,23 +19,20 @@ class AerDeployment:
         self.fc_bs = 30e9
         self.fc_uav = 40e9
         self.tx_pow_ue = 15
-        self.tx_pow_bs = 25
         self.tx_pow_uav = 20
         self.tx_pow_haps = 40
         # nodes are enumerated in the following way 0-n_ue (ues), n_ue-n_ue+n_bs (bss),
         # n_ue+n_bs-n_ue+n_bs+n_uav (uavs), n_ue+n_bs+n_uav-n_ue+n_bs+n_uav+1 (haps)
-        self.channel_matrix = np.zeros([self.n_ues + self.n_bs + self.n_uav + 1,
-                                        self.n_ues + self.n_bs + self.n_uav + 1])
-        self.propagation_dists = np.zeros([self.n_ues + self.n_bs + self.n_uav + 1,
-                                           self.n_ues + self.n_bs + self.n_uav + 1])
+        self.channel_matrix = np.zeros([self.n_ues + self.n_uav + 1,
+                                        self.n_ues + self.n_uav + 1])
+        self.propagation_dists = np.zeros([self.n_ues + self.n_uav + 1,
+                                           self.n_ues + self.n_uav + 1])
         self.mc_degree = 2
         self.active_connections = np.zeros([self.n_ues, self.mc_degree])
         self.haps_height = 1500
         self.uav_height = 200
-        self.bs_height = 20
         self.ue_height = 1.5
         self.ue_pos = np.zeros([self.n_ues, 3])
-        self.bs_pos = np.zeros([self.n_bs, 3])
         self.haps_pos = np.array([0, 0, self.haps_height])
         self.uav_pos = np.zeros([self.n_uav, 3])
         self.thermal_noise_density = -173.93
@@ -55,7 +51,6 @@ class AerDeployment:
 
     def drop_nodes(self):
         self.ue_pos = self.drop_in_circle(self.n_ues, self.ue_height)
-        self.bs_pos = self.drop_in_circle(self.n_bs, self.bs_height)
         self.uav_pos = self.drop_in_circle(self.n_uav, self.uav_height)
 
     def UMa_LoS(self, dist, f_carrier, h_bs=25.0, h_ms=1.5):
@@ -75,8 +70,8 @@ class AerDeployment:
         return pl
 
     def compute_channels(self):
-        for link1_num in range(self.n_ues + self.n_bs + self.n_uav + 1):
-            for link2_num in range(self.n_ues + self.n_bs + self.n_uav + 1):
+        for link1_num in range(self.n_ues + self.n_uav + 1):
+            for link2_num in range(self.n_ues + self.n_uav + 1):
                 if (link1_num < self.n_ues) and (link2_num < self.n_ues):
                     continue
                 else:
@@ -84,14 +79,10 @@ class AerDeployment:
                         tx_pow = self.tx_pow_ue
                         height1 = self.ue_height
                         pos1 = self.ue_pos[link1_num, :]
-                    elif self.n_ues <= link1_num < self.n_ues + self.n_bs:
-                        tx_pow = self.tx_pow_bs
-                        height1 = self.bs_height
-                        pos1 = self.ue_pos[self.n_bs - (link1_num - self.n_ues), :]
-                    elif self.n_ues + self.n_bs <= link1_num < self.n_ues + self.n_bs + self.n_uav:
+                    elif self.n_ues <= link1_num < self.n_ues + self.n_uav:
                         tx_pow = self.tx_pow_uav
                         height1 = self.uav_height
-                        pos1 = self.ue_pos[self.n_uav - (link1_num - self.n_ues - self.n_bs), :]
+                        pos1 = self.ue_pos[self.n_uav - (link1_num - self.n_ues), :]
                     else:
                         tx_pow = self.tx_pow_haps
                         height1 = self.haps_height
@@ -101,13 +92,9 @@ class AerDeployment:
                         height2 = self.ue_height
                         pos2 = self.ue_pos[link2_num, :]
                         fc = self.fc_uav
-                    elif self.n_ues <= link2_num < self.n_ues + self.n_bs:
-                        height2 = self.bs_height
-                        pos2 = self.bs_pos[link2_num - self.n_ues, :]
-                        fc = self.fc_bs
-                    elif self.n_ues + self.n_bs <= link2_num < self.n_ues + self.n_bs + self.n_uav:
+                    elif self.n_ues <= link2_num < self.n_ues + self.n_uav:
                         height2 = self.uav_height
-                        pos2 = self.uav_pos[link2_num - self.n_ues - self.n_bs, :]
+                        pos2 = self.uav_pos[link2_num - self.n_ues, :]
                         fc = self.fc_uav
                     else:
                         height2 = self.haps_height
@@ -163,6 +150,8 @@ class BasicOffloading:
         self.n_ues = len(self.users)
         self.uav_offload_prob = 0.7
         self.delay_statistics = {'ues': [], 'uavs':[], 'hap':[]}
+        self.prob_of_offloading_to_UAV = 0.3
+        self.prob_of_offloading_to_HAP = 0.2
 
     def generate_tasks(self):
         for user_id in self.users:
@@ -193,8 +182,20 @@ class BasicOffloading:
 
         # compute waiting time for local compute
         serv_time = self.processing_times['ues'][ue_num]
-        serving_node = next(item for item in self.servers if item.server_id == "ue"+str(ue_num))
-        D_UE = len(serving_node.tasks_queue)*serving_node.processing_time
+        # drop probability of offloading to UAV
+        offl_to_UAV = False
+        if random.random() < self.prob_of_offloading_to_UAV:
+            serving_node = next(item for item in self.servers if item.server_id == "uav")
+            offl_to_UAV = True
+        # drop probability of offloading to HAP
+        offl_to_HAP = False
+        if (random.random() < self.prob_of_offloading_to_HAP) and (offl_to_UAV == True):
+            serving_node = next(item for item in self.servers if item.server_id == "HAP")
+            offl_to_HAP = True
+
+        if (offl_to_UAV == False) and (offl_to_HAP == False):
+            serving_node = next(item for item in self.servers if item.server_id == "ue"+str(ue_num))
+
         x = task.arrival_time
         b = (1 - self.mean_arrival_rate*serv_time)
         F = 0
