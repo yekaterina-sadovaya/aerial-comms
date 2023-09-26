@@ -8,7 +8,7 @@ import heapq
 class AerDeployment:
     def __init__(self):
         self.n_ues = 10
-        self.n_uav = 2
+        self.n_uav = 1
         self.R_haps = 1500
         self.rate_parameter = 1/20
         self.n_tasks = int(1e2)
@@ -36,6 +36,7 @@ class AerDeployment:
         self.haps_pos = np.array([0, 0, self.haps_height])
         self.uav_pos = np.zeros([self.n_uav, 3])
         self.thermal_noise_density = -173.93
+        self.conn_info = {'ue'+str(ue): [] for ue in range(self.n_ues)}   # list contains node id and propagation delay
 
     def drop_in_circle(self, n_points, height):
         random.seed(self.seed)
@@ -113,6 +114,12 @@ class AerDeployment:
                 max_id = np.where(ch == max_num)[0][0]
                 ch[max_id] = 0
                 self.active_connections[ue, n] = max_id
+                if (self.n_ues+self.n_uav) > max_id >= self.n_ues:
+                    prop_delay = self.propagation_dists[ue, max_id]/299792458
+                    self.conn_info['ue'+str(ue)].append(['uav'+str(max_id - self.n_ues), prop_delay])
+                elif max_id == (self.n_ues+self.n_uav):
+                    prop_delay = self.propagation_dists[ue, max_id]/299792458
+                    self.conn_info['ue'+str(ue)].append(['hap', prop_delay])
 
 
 class Task:
@@ -124,27 +131,28 @@ class Task:
 
 
 class Server:
-    def __init__(self, processing_time, server_id, comp_resources):
+    def __init__(self, processing_time, server_id, comp_resources, C):
         self.processing_time = processing_time
         self.server_id = server_id
-        self.tasks_queue = []
+        self.tasks_queue = [[] for _ in range(C)]
         self.comp_resources = comp_resources
         self.current_time = 0
 
 
 class BasicOffloading:
-    def __init__(self, ue_connections, delay_matrix, num_tasks, mean_arrival_rate, n_uav):
+    def __init__(self, conn_info, num_tasks, mean_arrival_rate, n_uav):
         self.num_tasks = num_tasks
-        self.dist_matrix = delay_matrix
         self.mean_arrival_rate = mean_arrival_rate
         self.task_size = 10
         self.event_queue = []
-        self.ue_connections = ue_connections
+        self.ue_connections = conn_info
         self.resources_ue = 5
         self.resources_uav = 10
         self.resources_haps = 200
-        self.users = range(ue_connections.shape[0])
+        self.users = range(len(conn_info))
         self.processing_times = {'ues': [], 'uavs':[], 'hap':[]}
+        self.c_uav = 2
+        self.c_haps = 4
         self.servers = []
         self.n_uav = n_uav
         self.n_ues = len(self.users)
@@ -166,45 +174,62 @@ class BasicOffloading:
         for uav in range(self.n_uav):
             t_pr_uav = self.task_size / self.resources_uav
             self.processing_times['uavs'].append(t_pr_uav)
-            self.servers.append(Server(t_pr_uav, 'uav'+str(uav), self.resources_uav))
+            self.servers.append(Server(t_pr_uav, 'uav'+str(uav), self.resources_uav, self.c_uav))
 
         for ue in range(self.n_ues):
             t_pr_ue = self.task_size / self.resources_ue
             self.processing_times['ues'].append(t_pr_ue)
-            self.servers.append(Server(t_pr_ue, 'ue'+str(ue), self.resources_ue))
+            self.servers.append(Server(t_pr_ue, 'ue'+str(ue), self.resources_ue, 1))
 
         t_pr_hap = self.task_size / self.resources_haps
         self.processing_times['hap'].append(t_pr_hap)
-        self.servers.append(Server(t_pr_hap, 'hap', self.resources_haps))
+        self.servers.append(Server(t_pr_hap, 'hap', self.resources_haps, self.c_haps))
 
     def process_task(self, task, strategy_num):
         ue_num = task.user_id
 
-        # compute waiting time for local compute
-        serv_time = self.processing_times['ues'][ue_num]
         # drop probability of offloading to UAV
         offl_to_UAV = False
         if random.random() < self.prob_of_offloading_to_UAV:
-            serving_node = next(item for item in self.servers if item.server_id == "uav")
+            node_ids = [cn[0] for cn in self.ue_connections['ue'+str(ue_num)] if cn[0][0]=='u']
+            node_name = node_ids[0]
+            stat_id = 'uavs'
+            serving_node = next(item for item in self.servers if item.server_id == node_name)
             offl_to_UAV = True
+
         # drop probability of offloading to HAP
         offl_to_HAP = False
         if (random.random() < self.prob_of_offloading_to_HAP) and (offl_to_UAV == True):
-            serving_node = next(item for item in self.servers if item.server_id == "HAP")
+            node_name = "hap"
+            stat_id = 'hap'
+            serving_node = next(item for item in self.servers if item.server_id == node_name)
             offl_to_HAP = True
 
         if (offl_to_UAV == False) and (offl_to_HAP == False):
-            serving_node = next(item for item in self.servers if item.server_id == "ue"+str(ue_num))
+            node_name = "ue"
+            stat_id = 'ues'
+            serving_node = next(item for item in self.servers if item.server_id == node_name+str(ue_num))
 
-        x = task.arrival_time
-        b = (1 - self.mean_arrival_rate*serv_time)
-        F = 0
-        for k in range(0, np.floor(x/serv_time)):
-            fact_k = 1
-            for i in range(1, k+1):
-                fact_k = fact_k * i
-            F = F + b*(-self.mean_arrival_rate*((x - k*serv_time)**k)*
-                       np.exp(self.mean_arrival_rate*(x - k*serv_time)))/fact_k
+        # append tasks to the shortest queue
+        all_q_lens = [len(q) for q in serving_node.tasks_queue]
+        all_q_lens = np.array(all_q_lens)
+        min_len_id = np.where(all_q_lens == np.min(all_q_lens))
+        min_len_id = min_len_id[0][0]
+        q_i = serving_node.tasks_queue[min_len_id]
+        q_i.append(task)
+
+        # process tasks
+        FlagProcessing = 0
+        for q in serving_node.tasks_queue:
+            if len(q) > 0:
+                if serving_node.current_time > q[0].arrival_time:
+                    t_d = serving_node.current_time - q[0].arrival_time
+                    self.delay_statistics[stat_id].append(t_d)
+                    del q[0]
+                    FlagProcessing = 1
+
+        if (FlagProcessing == 1) or (serving_node.current_time == 0):
+            serving_node.current_time += serving_node.processing_time
 
     def run(self):
         self.generate_tasks()

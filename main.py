@@ -7,6 +7,5 @@ if __name__ == '__main__':
     deployment.compute_channels()
 
     # create the offloading instance
-    offl = BasicOffloading(deployment.active_connections, deployment.propagation_dists,
-                           1000, 1.5, deployment.n_uav)
+    offl = BasicOffloading(deployment.conn_info, 1000, 0.5, deployment.n_uav)
     offl.run()
