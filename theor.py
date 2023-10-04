@@ -10,10 +10,10 @@ def comp_factorial(k):
     return fact_k
 
 
-def comp_md1(x, D, l):
+def comp_md1(m, x, D, l):
 
     F = 0
-    for k in range(0, int(np.floor(x/D))):
+    for k in range(0, m):
         fact_k = comp_factorial(k)
         F = F + ((-l*(x - k*D))**k)*np.exp(l*(x - k*D))/fact_k
     F = (1 - l*D)*F
@@ -22,15 +22,16 @@ def comp_md1(x, D, l):
 
 def Qm(m, c, lambda_val, D):
 
-    Q = np.zeros(m)
+    Q = []
     e_lambdaD = math.exp(-lambda_val * D)
     q_first = q0(c, lambda_val, D)
-    Q[0] = q_first
-    for i in range(1, m):
+    Q.append(q_first)
+    for i in range(0, m):
         q_i = 0
         for j in range(0, int(c+i)):
             q_i += j*(((lambda_val * D)**(i+c*j))*e_lambdaD)/math.factorial(i+c-j)
-        Q[i] = q_i
+        Q.append(q_i)
+    Q = np.sum(Q)
     return Q
 
 
@@ -45,39 +46,41 @@ def q0(c, lambda_val, D):
     return q
 
 
-def comp_mdc(x, D, l, c):
+def comp_mdc(k, x, D, l, c):
 
-    k = int(np.floor(x/D))
-    m = int(k*c)
     if k == 0:
         F = 0
     else:
-        Q = Qm(m, c, l, D)
         F = 0
         a = math.exp(-l * (k * D - x))
-        for j in range(0, m):
-            numerator = Q[int(k*c-j-1)]*((-l*(x - k*D))**j)
+        for j in range(0, k*c - 1):
+            m = int(k*c-j-1)
+            Q = Qm(m, c, l, D)
+            numerator = Q*((-l*(x - k*D))**j)
             denominator = math.factorial(j)
             F += numerator / denominator
         F = a*F
     return F
 
 
-t_max = np.linspace(0.001, 0.01, 100)     # maximum allowed time
-D_UE = 0.001      # task processing time for UE
-lambda_UE = 0.5
+t = np.linspace(0.01, 0.5, 100)     # maximum allowed time
+D_UE = 0.01      # task processing time for UE
+lambda_UE = 0.75
 
 waiting_time_md1 = []
 waiting_time_mdc = []
-for t_max_i in t_max:
-    t_md1 = comp_md1(t_max_i - D_UE, D_UE, lambda_UE)
-    waiting_time_md1.append(t_md1)
-    t_mdc = comp_mdc(t_max_i - D_UE, D_UE, lambda_UE, 2)
-    waiting_time_mdc.append(t_mdc)
+for t_i in t:
+    n_ues = int(np.floor(t_i / D_UE))
+    t_md1 = comp_md1(n_ues, t_i - D_UE, D_UE, lambda_UE)
+    waiting_time_md1.append(t_md1 * np.heaviside(t_i - D_UE, 0))
+    t_mdc = comp_mdc(n_ues, t_i - D_UE, D_UE, lambda_UE, 2)
+    waiting_time_mdc.append(t_mdc * np.heaviside(t_i - D_UE, 0))
 
 print(waiting_time_md1)
 print(waiting_time_mdc)
 
+plt.figure()
+plt.plot(waiting_time_md1)
 plt.figure()
 plt.plot(waiting_time_mdc)
 plt.show()
