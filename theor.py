@@ -1,6 +1,7 @@
 import numpy as np
 import math
 import matplotlib.pyplot as plt
+from gekko import GEKKO
 
 
 def comp_factorial(k):
@@ -63,10 +64,11 @@ def comp_mdc(k, x, D, l, c):
     return F
 
 
-t = np.linspace(0.01, 0.5, 100)     # maximum allowed time
-D_UE = 0.01      # task processing time for UE
+t = np.linspace(0.01, 0.5, 1000)     # maximum allowed time
+D_UE = 0.1      # task processing time for UE
 lambda_UE = 0.75
 
+# test
 waiting_time_md1 = []
 waiting_time_mdc = []
 for t_i in t:
@@ -78,6 +80,31 @@ for t_i in t:
 
 print(waiting_time_md1)
 print(waiting_time_mdc)
+
+# compute coefficients for baseline strategy
+t_star = 0.06
+D_UAV = 0.05
+D_HAPS = 0.01
+lambda_UAV = 0.5
+lambda_HAPS = 0.35
+
+model = GEKKO()
+eps = model.Var(lb=0)
+nu = model.Var(lb=0)
+
+p_ue = comp_md1(int(np.floor(t_star / D_UE)), t_star - D_UE, D_UE, lambda_UE)*np.heaviside(t_star - D_UE, 0)
+p_uav = comp_mdc(int(np.floor(t_star / D_UAV)), t_star - D_UAV, D_UAV, lambda_UAV, 2)*np.heaviside(t_star - D_UAV, 0)
+p_haps = comp_mdc(int(np.floor(t_star / D_HAPS)),t_star - D_HAPS, D_HAPS, lambda_UAV, 2)*np.heaviside(t_star - D_HAPS, 0)
+obj = model.Intermediate(eps*p_ue + nu*p_uav + (1 - eps - nu)*p_haps)
+model.Equation(eps + nu <= 1)
+
+model.Maximize(obj)
+model.solve(disp=True)
+eps = np.array(eps)
+nu = np.array(nu)
+print('Eps = '+ str(eps)+', Nu = '+str(nu))
+res = eps*p_ue + nu*p_uav + (1 - eps - nu)*p_haps
+print('Probability of task being computed with the given time P(eps, nu) = '+str(res))
 
 plt.figure()
 plt.plot(waiting_time_md1)
