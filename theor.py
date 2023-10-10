@@ -64,7 +64,7 @@ def comp_mdc(k, x, D, l, c):
     return F
 
 
-t = np.linspace(0.01, 0.5, 1000)     # maximum allowed time
+t = np.linspace(0.01, 0.5, 100)     # maximum allowed time
 D_UE = 0.1      # task processing time for UE
 lambda_UE = 0.75
 
@@ -82,19 +82,26 @@ print(waiting_time_md1)
 print(waiting_time_mdc)
 
 # compute coefficients for baseline strategy
-t_star = 0.06
-D_UAV = 0.05
-D_HAPS = 0.01
+# task size in the paper is 1Mb with 60 GFLOP load
+r = 10      # fps
+t_star = 1/r
+C = 60      # GFLOP
+C_UE = 200
+C_UAV = 400
+C_HAP = 1000
+D_UE = C/C_UE
+D_UAV = C/C_UAV
+D_HAPS = C/C_HAP
 lambda_UAV = 0.5
 lambda_HAPS = 0.35
+
+p_ue = comp_md1(int(np.floor(t_star / D_UE)), t_star - D_UE, D_UE, lambda_UE)*np.heaviside(t_star - D_UE, 0)
+p_uav = comp_mdc(int(np.floor(t_star / D_UAV)), t_star - D_UAV, D_UAV, lambda_UAV, 5)*np.heaviside(t_star - D_UAV, 0)
+p_haps = comp_mdc(int(np.floor(t_star / D_HAPS)), t_star - D_HAPS, D_HAPS, lambda_UAV, 15)*np.heaviside(t_star - D_HAPS, 0)
 
 model = GEKKO()
 eps = model.Var(lb=0)
 nu = model.Var(lb=0)
-
-p_ue = comp_md1(int(np.floor(t_star / D_UE)), t_star - D_UE, D_UE, lambda_UE)*np.heaviside(t_star - D_UE, 0)
-p_uav = comp_mdc(int(np.floor(t_star / D_UAV)), t_star - D_UAV, D_UAV, lambda_UAV, 2)*np.heaviside(t_star - D_UAV, 0)
-p_haps = comp_mdc(int(np.floor(t_star / D_HAPS)),t_star - D_HAPS, D_HAPS, lambda_UAV, 2)*np.heaviside(t_star - D_HAPS, 0)
 obj = model.Intermediate(eps*p_ue + nu*p_uav + (1 - eps - nu)*p_haps)
 model.Equation(eps + nu <= 1)
 

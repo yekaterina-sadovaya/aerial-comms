@@ -10,10 +10,8 @@ class AerDeployment:
         self.n_ues = 10
         self.n_uav = 1
         self.R_haps = 1500
-        self.rate_parameter = 1/20
         self.n_tasks = int(1e2)
         self.precision = 3
-        self.task_size = 5
         self.seed = 1
         self.fc_haps = 60e9
         self.fc_bs = 30e9
@@ -123,11 +121,10 @@ class AerDeployment:
 
 
 class Task:
-    def __init__(self, arrival_time, user_id, task_size):
+    def __init__(self, arrival_time, user_id):
         self.arrival_time = arrival_time
         self.user_id = user_id
         self.queue_entry_time = 0
-        self.size = task_size
 
 
 class Server:
@@ -143,72 +140,70 @@ class BasicOffloading:
     def __init__(self, conn_info, num_tasks, mean_arrival_rate, n_uav):
         self.num_tasks = num_tasks
         self.mean_arrival_rate = mean_arrival_rate
-        self.task_size = 10
+        self.r = 10
+        self.C = 60
+        self.C_UE = 200
+        self.C_UAV = 400
+        self.C_HAP = 1000
         self.event_queue = []
         self.ue_connections = conn_info
-        self.resources_ue = 5
-        self.resources_uav = 10
-        self.resources_haps = 200
         self.users = range(len(conn_info))
         self.processing_times = {'ues': [], 'uavs':[], 'hap':[]}
-        self.c_uav = 2
-        self.c_haps = 4
         self.servers = []
         self.n_uav = n_uav
         self.n_ues = len(self.users)
-        self.uav_offload_prob = 0.7
         self.delay_statistics = {'ues': [], 'uavs':[], 'hap':[]}
-        self.prob_of_offloading_to_UAV = 0.3
-        self.prob_of_offloading_to_HAP = 0.2
+        self.prob_of_local_compute = 0.1
+        self.prob_of_offloading_to_UAV = 0.2
 
     def generate_tasks(self):
         for user_id in self.users:
             arrival_time = 0
             for _ in range(self.num_tasks):
                 arrival_time += random.expovariate(self.mean_arrival_rate)
-                task = Task(arrival_time, user_id, self.task_size)
+                task = Task(arrival_time, user_id)
                 heapq.heappush(self.event_queue, (arrival_time, task))
 
     def initialize_servers(self):
 
         for uav in range(self.n_uav):
-            t_pr_uav = self.task_size / self.resources_uav
+            t_pr_uav = self.C / self.C_UAV
             self.processing_times['uavs'].append(t_pr_uav)
-            self.servers.append(Server(t_pr_uav, 'uav'+str(uav), self.resources_uav, self.c_uav))
+            self.servers.append(Server(t_pr_uav, 'uav'+str(uav), self.C_UAV, 5))
 
         for ue in range(self.n_ues):
-            t_pr_ue = self.task_size / self.resources_ue
+            t_pr_ue = self.C / self.C_UE
             self.processing_times['ues'].append(t_pr_ue)
-            self.servers.append(Server(t_pr_ue, 'ue'+str(ue), self.resources_ue, 1))
+            self.servers.append(Server(t_pr_ue, 'ue'+str(ue), self.C_UE, 1))
 
-        t_pr_hap = self.task_size / self.resources_haps
+        t_pr_hap = self.C / self.C_HAP
         self.processing_times['hap'].append(t_pr_hap)
-        self.servers.append(Server(t_pr_hap, 'hap', self.resources_haps, self.c_haps))
+        self.servers.append(Server(t_pr_hap, 'hap', self.C_HAP, 15))
 
-    def process_task(self, task, strategy_num):
+    def process_task(self, task):
         ue_num = task.user_id
+
+        # drop probability of local compute
+        no_offl = False
+        if random.random() < self.prob_of_local_compute:
+            node_name = "ue"
+            stat_id = 'ues'
+            serving_node = next(item for item in self.servers if item.server_id == node_name+str(ue_num))
+            no_offl = True
 
         # drop probability of offloading to UAV
         offl_to_UAV = False
-        if random.random() < self.prob_of_offloading_to_UAV:
+        if (random.random() < self.prob_of_offloading_to_UAV) and (no_offl == False):
             node_ids = [cn[0] for cn in self.ue_connections['ue'+str(ue_num)] if cn[0][0]=='u']
             node_name = node_ids[0]
             stat_id = 'uavs'
             serving_node = next(item for item in self.servers if item.server_id == node_name)
             offl_to_UAV = True
 
-        # drop probability of offloading to HAP
-        offl_to_HAP = False
-        if (random.random() < self.prob_of_offloading_to_HAP) and (offl_to_UAV == True):
+        if (no_offl == False) and (offl_to_UAV == False):
             node_name = "hap"
             stat_id = 'hap'
             serving_node = next(item for item in self.servers if item.server_id == node_name)
-            offl_to_HAP = True
-
-        if (offl_to_UAV == False) and (offl_to_HAP == False):
-            node_name = "ue"
-            stat_id = 'ues'
-            serving_node = next(item for item in self.servers if item.server_id == node_name+str(ue_num))
 
         # append tasks to the shortest queue
         all_q_lens = [len(q) for q in serving_node.tasks_queue]
@@ -222,24 +217,36 @@ class BasicOffloading:
         FlagProcessing = 0
         for q in serving_node.tasks_queue:
             if len(q) > 0:
-                if serving_node.current_time > q[0].arrival_time:
+                if serving_node.current_time >= q[0].arrival_time:
                     t_d = serving_node.current_time - q[0].arrival_time
                     self.delay_statistics[stat_id].append(t_d)
                     del q[0]
                     FlagProcessing = 1
+                else:
+                    serving_node.current_time = q[0].arrival_time
 
         if (FlagProcessing == 1) or (serving_node.current_time == 0):
             serving_node.current_time += serving_node.processing_time
+
+        return FlagProcessing
 
     def run(self):
         self.generate_tasks()
         self.initialize_servers()
         while self.event_queue:
-            # event_time, event = self.event_queue[0]
-            event_time, event = heapq.heappop(self.event_queue)
-            # self.current_time = event_time
+            event_time, event = self.event_queue[0]
+            self.current_time = event_time
 
             if isinstance(event, Task):
-                self.process_task(event, 1)
+                wasProcessed = self.process_task(event)
+                if wasProcessed == True:
+                    heapq.heappop(self.event_queue)
 
-        print(self.delay_statistics)
+        # print(self.delay_statistics)
+        t_star = 1/10
+        av_latency = np.array(self.delay_statistics['ues'])
+        av_latency = np.append(av_latency, self.delay_statistics['uavs'])
+        av_latency = np.append(av_latency, self.delay_statistics['hap'])
+        percent_below_threshold = np.sum(av_latency <= t_star)/len(av_latency)
+        print('Delay <= t_star: ' + str(percent_below_threshold))
+        print('Average Delay: ' + str(np.mean(av_latency)))
