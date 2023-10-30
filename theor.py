@@ -1,120 +1,76 @@
+
 import numpy as np
 import math
-import matplotlib.pyplot as plt
-from gekko import GEKKO
+import networkx as nx
+from matplotlib import pyplot as plt
 
+lam = 0.9
+D = 1
+D_1 = 1
+c = 2
+rho = (lam * D)/c
+print("rho = ", rho)
+rho_1 = lam * D_1
+print("rho_1 = ", rho_1)
+M = round(0.5 * (1 + rho) * c + 10 * rho * math.sqrt(c))
+k_max = int(M/c) - 1
 
-def comp_factorial(k):
-    fact_k = 1
-    for i in range(1, k+1):
-        fact_k = fact_k * i
-    return fact_k
+print("M = ", M)
+print("k_max = ", k_max)
 
+p = np.zeros(M+1)
+q = np.zeros(2*M+1)
+p0 = 0.7845
+for i in range(M+1):
+    p[i] = p0 * 0.5**i
+P = p/sum(p)
+tau = 0.01
 
-def comp_md1(m, x, D, l):
-
-    F = 0
-    for k in range(0, m):
-        fact_k = comp_factorial(k)
-        F = F + ((-l*(x - k*D))**k)*np.exp(l*(x - k*D))/fact_k
-    F = (1 - l*D)*F
-    return F
-
-
-def Qm(m, c, lambda_val, D):
-
-    Q = []
-    e_lambdaD = math.exp(-lambda_val * D)
-    q_first = q0(c, lambda_val, D)
-    Q.append(q_first)
-    for i in range(0, m):
-        q_i = 0
-        for j in range(0, int(c+i)):
-            q_i += j*(((lambda_val * D)**(i+c*j))*e_lambdaD)/math.factorial(i+c-j)
-        Q.append(q_i)
-    Q = np.sum(Q)
-    return Q
-
-
-def q0(c, lambda_val, D):
-    e_lambdaD = math.exp(-lambda_val * D)
-    q = 0
-    for j in range(0, c):
-        q_sec_sum = 0
-        for m in range(0, c-j):
-            q_sec_sum += (((lambda_val * D)**m)*e_lambdaD)/math.factorial(m)
-        q += j*q_sec_sum
-    return q
-
-
-def comp_mdc(k, x, D, l, c):
-
-    if k == 0:
-        F = 0
+q = np.zeros(2*M)
+for l in range(2*M):
+    if l == 0:
+        q[l] = sum(P[:c+1])
     else:
-        F = 0
-        a = math.exp(-l * (k * D - x))
-        for j in range(0, k*c - 1):
-            m = int(k*c-j-1)
-            Q = Qm(m, c, l, D)
-            numerator = Q*((-l*(x - k*D))**j)
-            denominator = math.factorial(j)
-            F += numerator / denominator
-        F = a*F
-    return F
+        if c+l >= M:
+            q[l] = P[M] * tau**(c + l - M)
+        else:
+            q[l] = P[c+l]
 
+def W_mdc(x, c, D, lam, q):
+    k = math.floor(x/D)
+    temp = 0
+    for j in range(k * c - 1):
+        Q = sum(q[:k * c - 1 - j])
+        temp += Q * np.exp(lam * (x - k * D)) * math.pow( - lam * (x - k * D), j)/ math.factorial(j)
+    res = np.exp(lam * (x - k * D)) * temp
+    return res
 
-t = np.linspace(0.01, 0.5, 100)     # maximum allowed time
-D_UE = 0.1      # task processing time for UE
-lambda_UE = 0.75
+def W_md1(x, c, D, lam):
+    temp = 0
+    for k in range(math.floor(x/D)):
+        temp += (-lam * (x - k * D))**k * math.exp(lam * (x - k * D))/math.factorial(k)
+    res = (1 - lam * D) * temp
+    return res
 
-# test
-waiting_time_md1 = []
-waiting_time_mdc = []
-for t_i in t:
-    n_ues = int(np.floor(t_i / D_UE))
-    t_md1 = comp_md1(n_ues, t_i - D_UE, D_UE, lambda_UE)
-    waiting_time_md1.append(t_md1 * np.heaviside(t_i - D_UE, 0))
-    t_mdc = comp_mdc(n_ues, t_i - D_UE, D_UE, lambda_UE, 2)
-    waiting_time_mdc.append(t_mdc * np.heaviside(t_i - D_UE, 0))
+x1_value, xc_value, yc, y1 = [], [], [], []
 
-print(waiting_time_md1)
-print(waiting_time_mdc)
+x_all = np.linspace(0, 20, 100)
+# x_all = range(0, 20)
+for x in x_all:
+    yc.append(W_mdc(x, c, D, lam, q))
+    xc_value.append(x)
 
-# compute coefficients for baseline strategy
-# task size in the paper is 1Mb with 60 GFLOP load
-r = 10      # fps
-t_star = 1/r
-C = 60      # GFLOP
-C_UE = 200
-C_UAV = 400
-C_HAP = 1000
-D_UE = C/C_UE
-D_UAV = C/C_UAV
-D_HAPS = C/C_HAP
-lambda_UAV = 0.5
-lambda_HAPS = 0.35
+for x in np.arange(0,10,1):
+    y1.append(W_md1(x, c, D_1, lam))
+    x1_value.append(x)
 
-p_ue = comp_md1(int(np.floor(t_star / D_UE)), t_star - D_UE, D_UE, lambda_UE)*np.heaviside(t_star - D_UE, 0)
-p_uav = comp_mdc(int(np.floor(t_star / D_UAV)), t_star - D_UAV, D_UAV, lambda_UAV, 5)*np.heaviside(t_star - D_UAV, 0)
-p_haps = comp_mdc(int(np.floor(t_star / D_HAPS)), t_star - D_HAPS, D_HAPS, lambda_UAV, 15)*np.heaviside(t_star - D_HAPS, 0)
+yc_value = yc
+y1_value = y1
 
-model = GEKKO()
-eps = model.Var(lb=0)
-nu = model.Var(lb=0)
-obj = model.Intermediate(eps*p_ue + nu*p_uav + (1 - eps - nu)*p_haps)
-model.Equation(eps + nu <= 1)
+plt.plot(x1_value, y1_value)
+plt.title('M/D/1')
+plt.show()
 
-model.Maximize(obj)
-model.solve(disp=True)
-eps = np.array(eps)
-nu = np.array(nu)
-print('Eps = '+ str(eps)+', Nu = '+str(nu))
-res = eps*p_ue + nu*p_uav + (1 - eps - nu)*p_haps
-print('Probability of task being computed with the given time P(eps, nu) = '+str(res))
-
-plt.figure()
-plt.plot(waiting_time_md1)
-plt.figure()
-plt.plot(waiting_time_mdc)
+plt.plot(xc_value, yc_value)
+plt.title('M/D/c')
 plt.show()

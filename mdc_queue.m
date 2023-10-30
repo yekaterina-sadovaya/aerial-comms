@@ -11,20 +11,19 @@ D_UE = C/C_UE;
 D_UAV = C/C_UAV;
 D_HAPS = C/C_HAP;
 lambda_UAV = 0.5;
-lambda_HAPS = 2.5;
+lambda_HAPS = 0.9;
 
 lambda = lambda_HAPS;
-D = 0.4;
+D = 1;
 
-c = 5;
-n_points = 5000;
+c = 1;
+n_points = 20;
 
 % Set range for time
-k = 2;
 % x should start from D decause we can't have waiting time less then 
 % processing time
 % also (k-1)D <= x < kD
-x = linspace(D, 2, n_points);
+x = linspace(0, 20, n_points);
 
 % Compute e^(-lambda*D)
 e_lambdaD = exp(-lambda * D);
@@ -33,8 +32,9 @@ e_lambdaD = exp(-lambda * D);
 % compute maximum number equations (i)
 rho = (lambda*D)/c;
 M1 = 0.5*(1 + rho)*c + 10*rho*sqrt(c);
-M1 = floor(M1);
-M = max(M1, c*2);
+M1 = round(M1);
+%M = max(M1, c*5);
+M = M1;
 
 % check if all conditions are satisfied
 if rho >= 1
@@ -97,37 +97,62 @@ B = double(B);
 % 4. solve for p
 % P_ALL = linsolve(A,B);
 P_ALL = A\B;
+%P_ALL = sort(P_ALL,'descend');
 
+p = zeros(1, M+1);
+q = zeros(1, 2*M+1);
+p0 = 0.7845;
+for i=1:M
+    p(i) = p0 * 0.5^i;
+end
+P = p/sum(p);
+P_ALL = P;
 
 %% computation of Q values and CDF function F
-% first compute the parameters for Q computation 
-F_CDF = zeros(1, n_points);
-for each_i = 1:length(x)
-    x_i = x(each_i);
-    m = k*c - 1;
-
-    id_sum = min(c, length(P_ALL));
-    
-    % compute waiting time
-    F_w = 0;
-    u = x_i - k*D;
-    if (u < 0)  
-        F_w = 0;
-%     elseif (u > D)
-%         F_w = 0;    
+q_all = comp_Q(M, tau_val, c, P_ALL);
+F_CDF = zeros(1, length(x));
+for i_point = 1:length(x)
+    x_i = x(i_point);
+    k = floor(x_i/D);
+    if k > 0        
+        F_CDF(i_point) = W_mdc(k, x_i, c, D, lambda, q_all);
     else
-        for j = 0:(k*c - 1)
-            
-           q_index = k*c-j-1;
-           q_curr = sum(P_ALL(1:min(length(P_ALL),(j+c))));
-           
-           F_w = F_w + q_curr*((-lambda*u)^j)/factorial(j);
-        end
-        F_w = exp(-lambda * u)*F_w;
+        F_CDF(i_point) = 0;
     end
-    F_CDF(each_i) = F_w*heaviside(x_i);
 end
 
+
 %% plotting
-%CDF_norm = F_CDF/max(F_CDF);
 plot(x, F_CDF);
+
+% first compute Q 
+function q_all = comp_Q(M, tau, c, P_ALL)
+    q_all = zeros(1,2*M);
+    for j = 0:2*M
+        if j == 0
+            q_curr = sum(P_ALL(1:c));
+        else
+            if (c+j) >= M
+                if (M+1) <= length(P_ALL)
+                    q_curr = P_ALL(M+1)* tau^(c + j - M);
+                else
+                    q_curr = 0;
+                end
+            else
+               q_curr = P_ALL(c+j+1);
+            end
+        end
+        q_all(j+1) = q_curr;
+    end
+end
+
+function res = W_mdc(k, x, c, D, lam, q)
+    
+    temp = 0;
+    for j=0:(k * c - 1)
+        Q = sum(q(1:(k * c - j - 1)));
+        temp = temp + Q*exp(lam*(x - k*D))*((- lam*(x - k*D))^j)/ factorial(j);
+    end
+    res = exp(lam*(x - k*D))*temp;
+    
+end
