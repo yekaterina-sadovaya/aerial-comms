@@ -4,9 +4,9 @@ import math
 import networkx as nx
 from matplotlib import pyplot as plt
 
-lam = 0.9
-D = 1
-D_1 = 1
+lam = 0.5
+D = 0.1
+D_1 = 0.1
 c = 2
 rho = (lam * D)/c
 print("rho = ", rho)
@@ -48,19 +48,19 @@ def W_mdc(x, c, D, lam, q):
 def W_md1(x, c, D, lam):
     temp = 0
     for k in range(math.floor(x/D)):
-        temp += (-lam * (x - k * D))**k * math.exp(lam * (x - k * D))/math.factorial(k)
+        temp = temp + (-lam * (x - k * D))**k * math.exp(lam * (x - k * D))/math.factorial(k)
     res = (1 - lam * D) * temp
     return res
 
 x1_value, xc_value, yc, y1 = [], [], [], []
 
-x_all = np.linspace(0, 20, 100)
+x_all = np.linspace(0, 1, 100)
 # x_all = range(0, 20)
 for x in x_all:
     yc.append(W_mdc(x, c, D, lam, q))
     xc_value.append(x)
 
-for x in np.arange(0,10,1):
+for x in x_all:
     y1.append(W_md1(x, c, D_1, lam))
     x1_value.append(x)
 

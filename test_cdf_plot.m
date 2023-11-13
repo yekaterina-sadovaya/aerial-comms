@@ -83,20 +83,33 @@ for l =0:2*M
     end
 end
 
-%x_all = linspace(0, 20, 20);
+% x_all = linspace(0, 2, 100);
 x_all = 0:20;
 n = length(x_all);
 yc_value = zeros(1, n);
+y1_value = zeros(1, n);
 xc_value = zeros(1, n);
 for n_i=1:n
     x = x_all(n_i);
+    % (k-1)D <= x < kD
     k = floor(x/D);
+    if x < (k-1)*D
+        x = (k-1)*D;
+    elseif x > k*D
+        x = k*D;
+    end
     yc_value(n_i) = W_mdc(k, x, c, D, lam, q);
+    y1_value(n_i) = W_md1(x, D, lam);
     xc_value(n_i) = x;
 end
 
-plot(xc_value, yc_value);
+figure();
+plot(x_all, yc_value, '.-');
+title('M/D/c queue');
 
+figure();
+plot(x_all, y1_value, '.-');
+title('M/D/1 queue');
 
 function res = W_mdc(k, x, c, D, lam, q)
     
@@ -110,5 +123,15 @@ function res = W_mdc(k, x, c, D, lam, q)
         temp = temp + Q*exp(lam*(x - k*D))*((- lam*(x - k*D))^j)/ factorial(j);
     end
     res = exp(lam*(x - k*D))*temp;
+    
+end
+
+function res = W_md1(x, D, lam)
+    
+    temp = 0;
+    for k = 0:floor(x/D)
+        temp = temp + (-lam * (x - k * D))^k * exp(lam * (x - k * D))/factorial(k);
+    end
+    res = (1 - lam*D)*temp;
     
 end

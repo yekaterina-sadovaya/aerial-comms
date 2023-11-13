@@ -3,14 +3,23 @@ import math
 import random
 import copy
 import heapq
+import matplotlib.pyplot as plt
+
+
+def ecdf(a, plot_color=None, plot_style=None):
+    x = np.sort(a)
+    y = np.arange(len(x))/float(len(x))
+    if plot_color is None:
+        plt.plot(x, y)
+    else:
+        plt.plot(x, y, color=plot_color, linestyle=plot_style)
 
 
 class AerDeployment:
     def __init__(self):
-        self.n_ues = 10
-        self.n_uav = 1
+        self.n_ues = 30
+        self.n_uav = 3
         self.R_haps = 1500
-        self.n_tasks = int(1e2)
         self.precision = 3
         self.seed = 1
         self.fc_haps = 60e9
@@ -137,7 +146,8 @@ class Server:
 
 
 class BasicOffloading:
-    def __init__(self, conn_info, num_tasks, mean_arrival_rate, n_uav):
+    def __init__(self, conn_info, num_tasks, mean_arrival_rate, n_uav,
+                 eps_val, nu_val, ns_UAV, ns_HAP):
         self.num_tasks = num_tasks
         self.mean_arrival_rate = mean_arrival_rate
         self.r = 10
@@ -153,8 +163,11 @@ class BasicOffloading:
         self.n_uav = n_uav
         self.n_ues = len(self.users)
         self.delay_statistics = {'ues': [], 'uavs':[], 'hap':[]}
-        self.prob_of_local_compute = 0.1
-        self.prob_of_offloading_to_UAV = 0.2
+        self.prob_of_local_compute = eps_val
+        self.prob_of_offloading_to_UAV = nu_val
+        self.n_streams_UAV = ns_UAV
+        self.n_streams_HAP = ns_HAP
+        self.percent_below_thr = 0
 
     def generate_tasks(self):
         for user_id in self.users:
@@ -169,7 +182,7 @@ class BasicOffloading:
         for uav in range(self.n_uav):
             t_pr_uav = self.C / self.C_UAV
             self.processing_times['uavs'].append(t_pr_uav)
-            self.servers.append(Server(t_pr_uav, 'uav'+str(uav), self.C_UAV, 5))
+            self.servers.append(Server(t_pr_uav, 'uav'+str(uav), self.C_UAV, self.n_streams_UAV))
 
         for ue in range(self.n_ues):
             t_pr_ue = self.C / self.C_UE
@@ -178,7 +191,7 @@ class BasicOffloading:
 
         t_pr_hap = self.C / self.C_HAP
         self.processing_times['hap'].append(t_pr_hap)
-        self.servers.append(Server(t_pr_hap, 'hap', self.C_HAP, 15))
+        self.servers.append(Server(t_pr_hap, 'hap', self.C_HAP, self.n_streams_HAP))
 
     def process_task(self, task):
         ue_num = task.user_id
@@ -244,9 +257,16 @@ class BasicOffloading:
 
         # print(self.delay_statistics)
         t_star = 1/10
+        # ecdf(self.delay_statistics['ues'])
+        # ecdf(self.delay_statistics['uavs'])
+        # ecdf(self.delay_statistics['hap'])
+        # plt.legend(['UEs', 'UAVs', 'HAP'])
+        # plt.show()
         av_latency = np.array(self.delay_statistics['ues'])
         av_latency = np.append(av_latency, self.delay_statistics['uavs'])
         av_latency = np.append(av_latency, self.delay_statistics['hap'])
         percent_below_threshold = np.sum(av_latency <= t_star)/len(av_latency)
+        self.percent_below_thr = percent_below_threshold
         print('Delay <= t_star: ' + str(percent_below_threshold))
-        print('Average Delay: ' + str(np.mean(av_latency)))
+        print('Average Delay: ' + str(np.mean(av_latency)) + ' for Eps=' +
+              str(self.prob_of_local_compute) + ', Nu=' + str(self.prob_of_offloading_to_UAV))
