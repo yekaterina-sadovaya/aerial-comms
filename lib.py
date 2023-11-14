@@ -147,27 +147,27 @@ class Server:
 
 class BasicOffloading:
     def __init__(self, conn_info, num_tasks, mean_arrival_rate, n_uav,
-                 eps_val, nu_val, ns_UAV, ns_HAP):
+                 eps_val, nu_val, ns_UAV, ns_HAP, strategy_num):
         self.num_tasks = num_tasks
         self.mean_arrival_rate = mean_arrival_rate
-        self.r = 10
-        self.C = 60
+        self.task_size = 60
         self.C_UE = 200
-        self.C_UAV = 400
-        self.C_HAP = 1000
+        self.C_UAV = 500
+        self.C_HAP = 3000
         self.event_queue = []
         self.ue_connections = conn_info
         self.users = range(len(conn_info))
-        self.processing_times = {'ues': [], 'uavs':[], 'hap':[]}
+        self.processing_times = {'ues': [], 'uavs': [], 'hap': []}
         self.servers = []
         self.n_uav = n_uav
         self.n_ues = len(self.users)
-        self.delay_statistics = {'ues': [], 'uavs':[], 'hap':[]}
+        self.delay_statistics = {'ues': [], 'uavs': [], 'hap': []}
         self.prob_of_local_compute = eps_val
         self.prob_of_offloading_to_UAV = nu_val
         self.n_streams_UAV = ns_UAV
         self.n_streams_HAP = ns_HAP
         self.percent_below_thr = 0
+        self.strategy_num = strategy_num
 
     def generate_tasks(self):
         for user_id in self.users:
@@ -180,51 +180,97 @@ class BasicOffloading:
     def initialize_servers(self):
 
         for uav in range(self.n_uav):
-            t_pr_uav = self.C / self.C_UAV
+            t_pr_uav = self.task_size / self.C_UAV
             self.processing_times['uavs'].append(t_pr_uav)
             self.servers.append(Server(t_pr_uav, 'uav'+str(uav), self.C_UAV, self.n_streams_UAV))
 
         for ue in range(self.n_ues):
-            t_pr_ue = self.C / self.C_UE
+            t_pr_ue = self.task_size / self.C_UE
             self.processing_times['ues'].append(t_pr_ue)
             self.servers.append(Server(t_pr_ue, 'ue'+str(ue), self.C_UE, 1))
 
-        t_pr_hap = self.C / self.C_HAP
+        t_pr_hap = self.task_size / self.C_HAP
         self.processing_times['hap'].append(t_pr_hap)
         self.servers.append(Server(t_pr_hap, 'hap', self.C_HAP, self.n_streams_HAP))
 
     def process_task(self, task):
         ue_num = task.user_id
+        if self.strategy_num == 1:
+            # drop probability of local compute
+            no_offl = False
+            if random.random() < self.prob_of_local_compute:
+                node_name = "ue"
+                stat_id = 'ues'
+                serving_node = next(item for item in self.servers if item.server_id == node_name+str(ue_num))
+                no_offl = True
 
-        # drop probability of local compute
-        no_offl = False
-        if random.random() < self.prob_of_local_compute:
-            node_name = "ue"
-            stat_id = 'ues'
-            serving_node = next(item for item in self.servers if item.server_id == node_name+str(ue_num))
-            no_offl = True
+            # drop probability of offloading to UAV
+            offl_to_UAV = False
+            if (random.random() < self.prob_of_offloading_to_UAV) and (no_offl == False):
+                node_ids = [cn[0] for cn in self.ue_connections['ue'+str(ue_num)] if cn[0][0]=='u']
+                node_name = node_ids[0]
+                stat_id = 'uavs'
+                serving_node = next(item for item in self.servers if item.server_id == node_name)
+                offl_to_UAV = True
 
-        # drop probability of offloading to UAV
-        offl_to_UAV = False
-        if (random.random() < self.prob_of_offloading_to_UAV) and (no_offl == False):
-            node_ids = [cn[0] for cn in self.ue_connections['ue'+str(ue_num)] if cn[0][0]=='u']
-            node_name = node_ids[0]
-            stat_id = 'uavs'
-            serving_node = next(item for item in self.servers if item.server_id == node_name)
-            offl_to_UAV = True
+            if (no_offl == False) and (offl_to_UAV == False):
+                node_name = "hap"
+                stat_id = 'hap'
+                serving_node = next(item for item in self.servers if item.server_id == node_name)
 
-        if (no_offl == False) and (offl_to_UAV == False):
-            node_name = "hap"
-            stat_id = 'hap'
-            serving_node = next(item for item in self.servers if item.server_id == node_name)
+            # append tasks to the shortest queue
+            all_q_lens = [len(q) for q in serving_node.tasks_queue]
+            all_q_lens = np.array(all_q_lens)
+            min_len_id = np.where(all_q_lens == np.min(all_q_lens))
+            min_len_id = min_len_id[0][0]
+            q_i = serving_node.tasks_queue[min_len_id]
+            q_i.append(task)
 
-        # append tasks to the shortest queue
-        all_q_lens = [len(q) for q in serving_node.tasks_queue]
-        all_q_lens = np.array(all_q_lens)
-        min_len_id = np.where(all_q_lens == np.min(all_q_lens))
-        min_len_id = min_len_id[0][0]
-        q_i = serving_node.tasks_queue[min_len_id]
-        q_i.append(task)
+        elif self.strategy_num == 2:
+
+            if random.random() < self.prob_of_local_compute:
+                node_name = "ue"
+                stat_id = 'ues'
+                serving_node = next(item for item in self.servers if item.server_id == node_name+str(ue_num))
+
+            else:
+                node_ids = [cn[0] for cn in self.ue_connections['ue'+str(ue_num)] if cn[0][0]=='u']
+                node_name1 = node_ids[0]
+                node_name2 = "hap"
+                serving_node1 = next(item for item in self.servers if item.server_id == node_name1)
+                serving_node2 = next(item for item in self.servers if item.server_id == node_name2)
+                serving_nodes = [serving_node1, serving_node2]
+                for sn in serving_nodes:
+                    all_q_lens = [len(q) for q in sn.tasks_queue]
+                    all_q_lens = np.array(all_q_lens)
+                    min_len_id = np.where(all_q_lens == np.min(all_q_lens))
+                    min_len_id = min_len_id[0][0]
+                    q_i = sn.tasks_queue[min_len_id]
+                    q_i.append(task)
+
+        elif self.strategy_num == 3:
+
+            if random.random() < self.prob_of_local_compute:
+                node_name = "ue"
+                stat_id = 'ues'
+                serving_node = next(item for item in self.servers if item.server_id == node_name+str(ue_num))
+
+            else:
+                node_ids = [cn[0] for cn in self.ue_connections['ue'+str(ue_num)] if cn[0][0]=='u']
+                node_name1 = node_ids[0]
+                node_name2 = "hap"
+                serving_node1 = next(item for item in self.servers if item.server_id == node_name1)
+                serving_node1.processing_time = serving_node1.processing_time/2
+                serving_node2 = next(item for item in self.servers if item.server_id == node_name2)
+                serving_node2.processing_time = serving_node2.processing_time/2
+                serving_nodes = [serving_node1, serving_node2]
+                for sn in serving_nodes:
+                    all_q_lens = [len(q) for q in sn.tasks_queue]
+                    all_q_lens = np.array(all_q_lens)
+                    min_len_id = np.where(all_q_lens == np.min(all_q_lens))
+                    min_len_id = min_len_id[0][0]
+                    q_i = sn.tasks_queue[min_len_id]
+                    q_i.append(task)
 
         # process tasks
         FlagProcessing = 0
@@ -256,7 +302,7 @@ class BasicOffloading:
                     heapq.heappop(self.event_queue)
 
         # print(self.delay_statistics)
-        t_star = 1/10
+        t_star = 1/self.mean_arrival_rate
         # ecdf(self.delay_statistics['ues'])
         # ecdf(self.delay_statistics['uavs'])
         # ecdf(self.delay_statistics['hap'])

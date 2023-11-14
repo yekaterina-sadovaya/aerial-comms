@@ -16,8 +16,8 @@ def compute(ns_UAV, ns_HAP, eps_all, nu_all, file_name):
     for eps_val in eps_all:
         for nu_val in nu_all:
             # create the offloading instance
-            offl = BasicOffloading(deployment.conn_info, 10000, 0.5, deployment.n_uav,
-                                   eps_val, nu_val, ns_UAV, ns_HAP)
+            offl = BasicOffloading(deployment.conn_info, 10000, 2, deployment.n_uav,
+                                   eps_val, nu_val, ns_UAV, ns_HAP, 1)
             offl.run()
             perc_stat.append(offl.percent_below_thr)
             x.append(eps_val)
@@ -57,6 +57,6 @@ if __name__ == '__main__':
     ns_HAP = 15
     eps_all = np.linspace(0, 1, 11)
     nu_all = np.linspace(0, 1, 11)
-    file_name = 'data.pickle'
-    # compute(ns_UAV, ns_HAP, eps_all, nu_all, file_name)
+    file_name = 'data_30_1st_r2.pickle'
+    compute(ns_UAV, ns_HAP, eps_all, nu_all, file_name)
     plot_from_data(file_name)
