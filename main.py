@@ -31,7 +31,7 @@ def compute(n_ues, ns_UAV, ns_HAP, eps_all, nu_all, file_name, strategy_number):
             x.append(1.0)
             y.append(0.0)
         else:
-            offl = BasicOffloading(deployment.conn_info, 100, 2, deployment.n_uav,
+            offl = BasicOffloading(deployment.conn_info, 1000, 2, deployment.n_uav,
                                    eps_val, 0.1, ns_UAV, ns_HAP, strategy_number)
             offl.run()
             perc_stat.append(offl.percent_below_thr)
@@ -41,7 +41,8 @@ def compute(n_ues, ns_UAV, ns_HAP, eps_all, nu_all, file_name, strategy_number):
 
         data = {'x': x,
                 'y': y,
-                'z': perc_stat}
+                'z': perc_stat,
+                'delays': offl.delay_statistics}
 
         with open(file_name, 'wb') as file:
             # Serialize and write the variable to the file
@@ -69,12 +70,18 @@ def plot_from_data(file_name):
 
 if __name__ == '__main__':
 
-    n_ues = 30
+    #n_ues = 30
     ns_UAV = 5
     ns_HAP = 15
-    strategy_number = 2
-    eps_all = np.linspace(0, 1, 11)
-    nu_all = np.linspace(0, 1, 11)
-    file_name = 'data_'+str(n_ues)+'_str'+str(strategy_number)+'_r2.pickle'
-    compute(n_ues, ns_UAV, ns_HAP, eps_all, nu_all, file_name, strategy_number)
-    plot_from_data(file_name)
+    strategy_number = [2, 3]
+    # eps_all = np.linspace(0, 1, 11)
+    # nu_all = np.linspace(0, 1, 11)
+    eps_all = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+    #eps_all = [1.0]
+    nu_all = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+    n_all = [60, 90, 120, 200]
+    for st in strategy_number:
+        for n_ues in n_all:
+            file_name = 'data_'+str(n_ues)+'_str'+str(st)+'_r2.pickle'
+            compute(n_ues, ns_UAV, ns_HAP, eps_all, nu_all, file_name, st)
+    #plot_from_data(file_name)

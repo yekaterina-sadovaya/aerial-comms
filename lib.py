@@ -151,10 +151,14 @@ class BasicOffloading:
                  eps_val, nu_val, ns_UAV, ns_HAP, strategy_num):
         self.num_tasks = num_tasks
         self.mean_arrival_rate = mean_arrival_rate
-        self.task_size = 50
-        self.C_UE = 200
-        self.C_UAV = 500
-        self.C_HAP = 3000
+        if strategy_num == 3:
+            self.task_size = 2e6/2
+        else:
+            self.task_size = 2e6
+        self.const_load = 40e9
+        self.C_UE = 200e9
+        self.C_UAV = 500e9
+        self.C_HAP = 3000e9
         self.event_queue = []
         self.ue_connections = conn_info
         self.users = range(len(conn_info))
@@ -169,7 +173,7 @@ class BasicOffloading:
         self.n_streams_HAP = ns_HAP
         self.percent_below_thr = 0
         self.strategy_num = strategy_num
-        self.was_processed = []
+        self.was_processed = {}
 
     def generate_tasks(self):
         for user_id in self.users:
@@ -182,16 +186,16 @@ class BasicOffloading:
     def initialize_servers(self):
 
         for uav in range(self.n_uav):
-            t_pr_uav = self.task_size / self.C_UAV
+            t_pr_uav = (self.task_size+self.const_load) / self.C_UAV
             self.processing_times['uavs'].append(t_pr_uav)
             self.servers.append(Server(t_pr_uav, 'uav'+str(uav), self.C_UAV, self.n_streams_UAV))
 
         for ue in range(self.n_ues):
-            t_pr_ue = self.task_size / self.C_UE
+            t_pr_ue = (self.task_size+self.const_load) / self.C_UE
             self.processing_times['ues'].append(t_pr_ue)
             self.servers.append(Server(t_pr_ue, 'ue'+str(ue), self.C_UE, 1))
 
-        t_pr_hap = self.task_size / self.C_HAP
+        t_pr_hap = (self.task_size+self.const_load) / self.C_HAP
         self.processing_times['hap'].append(t_pr_hap)
         self.servers.append(Server(t_pr_hap, 'hap', self.C_HAP, self.n_streams_HAP))
 
@@ -229,7 +233,7 @@ class BasicOffloading:
             q_i.append(task)
             serving_nodes = [serving_node]
 
-        elif self.strategy_num == 2:
+        else:
 
             OffloadingFlag = False
             if random.random() < self.prob_of_local_compute:
@@ -246,42 +250,39 @@ class BasicOffloading:
                 serving_node1 = next(item for item in self.servers if item.server_id == node_name1)
                 serving_node2 = next(item for item in self.servers if item.server_id == node_name2)
                 serving_nodes = [serving_node1, serving_node2]
-                for sn in serving_nodes:
-                    all_q_lens = [len(q) for q in sn.tasks_queue]
-                    all_q_lens = np.array(all_q_lens)
-                    min_len_id = np.where(all_q_lens == np.min(all_q_lens))
-                    min_len_id = min_len_id[0][0]
-                    q_i = sn.tasks_queue[min_len_id]
-                    q_i.append(task)
 
-        elif self.strategy_num == 3:
+            for sn in serving_nodes:
+                all_q_lens = [len(q) for q in sn.tasks_queue]
+                all_q_lens = np.array(all_q_lens)
+                min_len_id = np.where(all_q_lens == np.min(all_q_lens))
+                min_len_id = min_len_id[0][0]
+                q_i = sn.tasks_queue[min_len_id]
+                q_i.append(task)
 
-            OffloadingFlag = False
-            if random.random() < self.prob_of_local_compute:
-                node_name = "ue"
-                stat_ids = ['ues']
-                serving_node = next(item for item in self.servers if item.server_id == node_name+str(ue_num))
-                serving_nodes = [serving_node]
-            else:
-                OffloadingFlag = True
-                node_ids = [cn[0] for cn in self.ue_connections['ue'+str(ue_num)] if cn[0][0]=='u']
-                node_name1 = node_ids[0]
-                node_name2 = "hap"
-                stat_ids = ['uavs', 'hap']
-                serving_node1 = next(item for item in self.servers if item.server_id == node_name1)
-                if serving_node1.current_time == 0:
-                    serving_node1.processing_time = serving_node1.processing_time/2
-                serving_node2 = next(item for item in self.servers if item.server_id == node_name2)
-                if serving_node2.current_time == 0:
-                    serving_node2.processing_time = serving_node2.processing_time/2
-                serving_nodes = [serving_node1, serving_node2]
-                for sn in serving_nodes:
-                    all_q_lens = [len(q) for q in sn.tasks_queue]
-                    all_q_lens = np.array(all_q_lens)
-                    min_len_id = np.where(all_q_lens == np.min(all_q_lens))
-                    min_len_id = min_len_id[0][0]
-                    q_i = sn.tasks_queue[min_len_id]
-                    q_i.append(task)
+        # elif self.strategy_num == 3:
+        #
+        #     OffloadingFlag = False
+        #     if random.random() < self.prob_of_local_compute:
+        #         node_name = "ue"
+        #         stat_ids = ['ues']
+        #         serving_node = next(item for item in self.servers if item.server_id == node_name+str(ue_num))
+        #         serving_nodes = [serving_node]
+        #     else:
+        #         OffloadingFlag = True
+        #         node_ids = [cn[0] for cn in self.ue_connections['ue'+str(ue_num)] if cn[0][0]=='u']
+        #         node_name1 = node_ids[0]
+        #         node_name2 = "hap"
+        #         stat_ids = ['uavs', 'hap']
+        #         serving_node1 = next(item for item in self.servers if item.server_id == node_name1)
+        #         serving_node2 = next(item for item in self.servers if item.server_id == node_name2)
+        #         serving_nodes = [serving_node1, serving_node2]
+        #         for sn in serving_nodes:
+        #             all_q_lens = [len(q) for q in sn.tasks_queue]
+        #             all_q_lens = np.array(all_q_lens)
+        #             min_len_id = np.where(all_q_lens == np.min(all_q_lens))
+        #             min_len_id = min_len_id[0][0]
+        #             q_i = sn.tasks_queue[min_len_id]
+        #             q_i.append(task)
 
         # process tasks
         for i, serving_node in enumerate(serving_nodes):
@@ -291,17 +292,22 @@ class BasicOffloading:
                     if serving_node.current_time >= q[0].arrival_time:
                         t_d = serving_node.current_time - q[0].arrival_time
                         id_task = q[0].task_id
-                        if self.strategy_num == 1 or self.strategy_num == 4:
+                        if serving_node.server_id == 'ue':
                             self.delay_statistics[stat_ids[i]].append(t_d)
-                        elif self.strategy_num == 2:
-                            if id_task not in self.was_processed:
-                                self.delay_statistics[stat_ids[i]].append(t_d)
+                            del q[0]
+                            FlagProcessing = 1
                         else:
-                            if id_task in self.was_processed:
+                            if self.strategy_num == 1 or self.strategy_num == 4:
                                 self.delay_statistics[stat_ids[i]].append(t_d)
-                        del q[0]
-                        self.was_processed.append(id_task)
-                        FlagProcessing = 1
+                            elif self.strategy_num == 2:
+                                if id_task in self.was_processed:
+                                    self.delay_statistics[stat_ids[i]].append(min(t_d, self.was_processed[id_task]))
+                            else:
+                                if id_task in self.was_processed:
+                                    self.delay_statistics[stat_ids[i]].append(max(t_d, self.was_processed[id_task]))
+                            del q[0]
+                            self.was_processed[id_task] = t_d
+                            FlagProcessing = 1
                     else:
                         serving_node.current_time = q[0].arrival_time
 
