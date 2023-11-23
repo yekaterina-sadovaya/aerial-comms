@@ -311,8 +311,8 @@ class BasicOffloading:
                     else:
                         serving_node.current_time = q[0].arrival_time
 
-        if (FlagProcessing == 1) or (serving_node.current_time == 0):
-            serving_node.current_time += serving_node.processing_time
+            if (FlagProcessing == 1) or (serving_node.current_time == 0):
+                serving_node.current_time += serving_node.processing_time
 
         return FlagProcessing
 
