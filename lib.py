@@ -259,31 +259,6 @@ class BasicOffloading:
                 q_i = sn.tasks_queue[min_len_id]
                 q_i.append(task)
 
-        # elif self.strategy_num == 3:
-        #
-        #     OffloadingFlag = False
-        #     if random.random() < self.prob_of_local_compute:
-        #         node_name = "ue"
-        #         stat_ids = ['ues']
-        #         serving_node = next(item for item in self.servers if item.server_id == node_name+str(ue_num))
-        #         serving_nodes = [serving_node]
-        #     else:
-        #         OffloadingFlag = True
-        #         node_ids = [cn[0] for cn in self.ue_connections['ue'+str(ue_num)] if cn[0][0]=='u']
-        #         node_name1 = node_ids[0]
-        #         node_name2 = "hap"
-        #         stat_ids = ['uavs', 'hap']
-        #         serving_node1 = next(item for item in self.servers if item.server_id == node_name1)
-        #         serving_node2 = next(item for item in self.servers if item.server_id == node_name2)
-        #         serving_nodes = [serving_node1, serving_node2]
-        #         for sn in serving_nodes:
-        #             all_q_lens = [len(q) for q in sn.tasks_queue]
-        #             all_q_lens = np.array(all_q_lens)
-        #             min_len_id = np.where(all_q_lens == np.min(all_q_lens))
-        #             min_len_id = min_len_id[0][0]
-        #             q_i = sn.tasks_queue[min_len_id]
-        #             q_i.append(task)
-
         # process tasks
         for i, serving_node in enumerate(serving_nodes):
             FlagProcessing = 0
@@ -328,13 +303,7 @@ class BasicOffloading:
                 if wasProcessed == True:
                     heapq.heappop(self.event_queue)
 
-        # print(self.delay_statistics)
         t_star = 1/self.mean_arrival_rate
-        # ecdf(self.delay_statistics['ues'])
-        # ecdf(self.delay_statistics['uavs'])
-        # ecdf(self.delay_statistics['hap'])
-        # plt.legend(['UEs', 'UAVs', 'HAP'])
-        # plt.show()
         av_latency = np.array(self.delay_statistics['ues'])
         av_latency = np.append(av_latency, self.delay_statistics['uavs'])
         av_latency = np.append(av_latency, self.delay_statistics['hap'])
